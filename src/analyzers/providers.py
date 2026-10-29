@@ -15,6 +15,31 @@ from src.config_loader import ProviderConfig, resolve_env
 
 log = logging.getLogger(__name__)
 
+_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "url": {"type": "string"},
+        "summary": {"type": "string"},
+        "insight": {"type": "string"},
+        "importance": {"type": "integer"},
+        "category": {"type": "string"},
+    },
+    "required": ["title", "url", "summary", "insight", "importance", "category"],
+    "additionalProperties": False,
+}
+BRIEF_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "headline": {"type": "string"},
+        "overview": {"type": "string"},
+        "items": {"type": "array", "items": _ITEM_SCHEMA},
+        "rising_keywords": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["headline", "overview", "items", "rising_keywords"],
+    "additionalProperties": False,
+}
+
 
 class LLMProvider(ABC):
     def __init__(self, cfg: ProviderConfig, api_key: str | None) -> None:
@@ -45,24 +70,31 @@ class GeminiProvider(LLMProvider):
 
 
 class ClaudeProvider(LLMProvider):
+    """Claude Messages API. No assistant prefill and no sampling params: current models reject both.
+    JSON-only output is enforced via the system prompt plus structured outputs (output_config.format)."""
+
     async def complete_json(self, client, system, user, temperature) -> str:
         headers = {"x-api-key": self.api_key or "", "anthropic-version": "2023-06-01"}
         body = {
             "model": self.model,
-            "max_tokens": 4096,
-            "temperature": temperature,
+            "max_tokens": 8192,
             "system": system,
-            "messages": [{"role": "user", "content": user}, {"role": "assistant", "content": "{"}],
+            "messages": [{"role": "user", "content": user}],
+            "output_config": {"format": {"type": "json_schema", "schema": BRIEF_JSON_SCHEMA}},
         }
         r = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers=headers,
-            json=body,
-            timeout=self.cfg.timeout_seconds,
+            "https://api.anthropic.com/v1/messages", headers=headers, json=body, timeout=self.cfg.timeout_seconds
         )
+        if r.status_code == 400 and "output_config" in r.text:
+            body.pop("output_config")  # older models/platforms without structured outputs
+            r = await client.post(
+                "https://api.anthropic.com/v1/messages", headers=headers, json=body, timeout=self.cfg.timeout_seconds
+            )
         r.raise_for_status()
-        text = "".join(b.get("text", "") for b in r.json()["content"] if b.get("type") == "text")
-        return "{" + text
+        data = r.json()
+        if data.get("stop_reason") == "refusal":
+            raise RuntimeError("claude refused the request (stop_reason=refusal)")
+        return "".join(b.get("text", "") for b in data["content"] if b.get("type") == "text")
 
 
 class OpenAIProvider(LLMProvider):

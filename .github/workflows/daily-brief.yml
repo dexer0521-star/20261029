@@ -7,10 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       preset:
-        description: "Preset to run (leave empty to use config/config.yaml)"
-        type: choice
+        description: "Preset name (ai-tech-news | kbeauty-commerce | quant-macro). Empty = config/config.yaml"
+        type: string
         default: ""
-        options: ["", "ai-tech-news", "kbeauty-commerce", "quant-macro"]
       dry_run:
         description: "Dry run (no keys, sample data, markdown only)"
         type: boolean
