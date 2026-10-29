@@ -1,0 +1,37 @@
+name: ai-tech-news
+description: "AI / developer tooling news from HN, TechCrunch AI, The Verge AI"
+timezone: "UTC"
+sources:
+  - name: hackernews
+    type: hackernews
+    limit: 40
+    min_score: 80
+    params: { feed: top }
+  - name: rss:techcrunch-ai
+    type: rss
+    limit: 20
+    params:
+      feeds:
+        - https://techcrunch.com/category/artificial-intelligence/feed/
+  - name: rss:verge-ai
+    type: rss
+    limit: 15
+    params:
+      feeds:
+        - https://www.theverge.com/rss/ai-artificial-intelligence/index.xml
+filters:
+  include_keywords: []
+  exclude_keywords: ["hiring", "sponsored"]
+  max_age_hours: 36
+  max_items: 40
+llm:
+  primary: { provider: gemini, model: gemini-2.5-flash, api_key_env: GEMINI_API_KEY }
+  fallbacks:
+    - { provider: claude, model: claude-haiku-5-5, api_key_env: ANTHROPIC_API_KEY }
+  language: en
+  audience: "software engineers tracking AI tooling"
+  max_brief_items: 10
+notifiers:
+  - { type: markdown, path: output }
+  - { type: slack, webhook_env: SLACK_WEBHOOK_URL }
+state: { path: .state/last_run.json }

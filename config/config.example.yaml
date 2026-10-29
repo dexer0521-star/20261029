@@ -1,0 +1,92 @@
+# cron-trend-agent configuration
+# ---------------------------------------------------------------
+# Copy to config/config.yaml (or pass --config / --preset).
+# NEVER put secrets here. Only name the environment variable that
+# holds them (set as GitHub Actions Secrets).
+# ---------------------------------------------------------------
+name: default
+description: "Daily tech + AI trend brief"
+timezone: "Asia/Seoul"
+
+sources:
+  - name: hackernews
+    type: hackernews
+    limit: 30
+    min_score: 50
+    params:
+      feed: top            # top | new | best | ask | show
+
+  - name: rss:techcrunch
+    type: rss
+    limit: 20
+    params:
+      feeds:
+        - https://techcrunch.com/feed/
+
+  - name: reddit:r-programming
+    type: reddit
+    enabled: false         # enable when you want it; no API key required
+    limit: 20
+    min_score: 100
+    params:
+      subreddit: programming
+      sort: hot
+
+  - name: apify:example
+    type: apify
+    enabled: false         # requires APIFY_TOKEN
+    params:
+      actor_id: "apify/google-search-scraper"
+      token_env: APIFY_TOKEN
+      input:
+        queries: "ai agent"
+        maxPagesPerQuery: 1
+
+filters:
+  include_keywords: []     # empty = keep everything
+  exclude_keywords: ["hiring", "sponsored"]
+  max_age_hours: 48
+  max_items: 40
+  only_fresh: false        # true = send only NEW / RISING items to the LLM
+
+llm:
+  primary:
+    provider: gemini
+    model: gemini-2.5-flash
+    api_key_env: GEMINI_API_KEY
+  fallbacks:
+    - provider: claude
+      model: claude-haiku-5-5
+      api_key_env: ANTHROPIC_API_KEY
+    - provider: openai
+      model: gpt-4o-mini
+      api_key_env: OPENAI_API_KEY
+  language: en
+  audience: "developers and indie hackers"
+  max_brief_items: 10
+  temperature: 0.2
+  extra_instructions: ""
+
+notifiers:
+  - type: markdown
+    path: output
+  - type: slack
+    webhook_env: SLACK_WEBHOOK_URL
+  - type: notion
+    enabled: false
+    token_env: NOTION_TOKEN
+    database_id_env: NOTION_DATABASE_ID
+  - type: email
+    enabled: false
+    params:
+      host_env: SMTP_HOST
+      port_env: SMTP_PORT
+      user_env: SMTP_USER
+      password_env: SMTP_PASSWORD
+      to_env: EMAIL_TO
+
+state:
+  path: .state/last_run.json
+  rising_score_delta: 50
+  rising_rank_jump: 5
+  keep_runs: 7

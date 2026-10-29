@@ -1,0 +1,45 @@
+name: quant-macro
+description: "Macro / markets headlines (Fed, CPI, rates, FX) from public RSS feeds"
+timezone: "America/New_York"
+sources:
+  - name: rss:fed-press
+    type: rss
+    limit: 10
+    params:
+      feeds:
+        - https://www.federalreserve.gov/feeds/press_all.xml
+  - name: rss:cnbc-economy
+    type: rss
+    limit: 25
+    params:
+      feeds:
+        - https://www.cnbc.com/id/20910258/device/rss/rss.html
+  - name: rss:google-news-macro
+    type: rss
+    limit: 25
+    params:
+      feeds:
+        - https://news.google.com/rss/search?q=CPI+OR+FOMC+OR+%22rate+cut%22+OR+treasury+yields&hl=en-US&gl=US&ceid=US:en
+  - name: hackernews
+    type: hackernews
+    enabled: false
+    limit: 30
+    min_score: 100
+    params: { feed: top }
+filters:
+  include_keywords: ["fed", "fomc", "cpi", "inflation", "rate", "yield", "treasury", "dollar", "jobs", "gdp"]
+  exclude_keywords: []
+  max_age_hours: 24
+  max_items: 35
+llm:
+  primary: { provider: claude, model: claude-sonnet-5-5, api_key_env: ANTHROPIC_API_KEY }
+  fallbacks:
+    - { provider: gemini, model: gemini-2.5-flash, api_key_env: GEMINI_API_KEY }
+  language: en
+  audience: "systematic traders and macro researchers"
+  max_brief_items: 10
+  extra_instructions: "Tag each item with the asset class it moves (rates, FX, equities, credit, commodities)."
+notifiers:
+  - { type: markdown, path: output }
+  - { type: slack, webhook_env: SLACK_WEBHOOK_URL }
+state: { path: .state/last_run.json, rising_score_delta: 10, rising_rank_jump: 3 }

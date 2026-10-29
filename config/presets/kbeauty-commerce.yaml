@@ -1,0 +1,46 @@
+name: kbeauty-commerce
+description: "K-beauty & cross-border commerce signals (Reddit, Google News RSS, Apify optional)"
+timezone: "Asia/Seoul"
+sources:
+  - name: reddit:AsianBeauty
+    type: reddit
+    limit: 30
+    min_score: 20
+    params: { subreddit: AsianBeauty, sort: hot }
+  - name: rss:google-news-kbeauty
+    type: rss
+    limit: 25
+    params:
+      feeds:
+        - https://news.google.com/rss/search?q=%22k-beauty%22+OR+%22korean+skincare%22&hl=en-US&gl=US&ceid=US:en
+  - name: rss:google-news-amazon-beauty
+    type: rss
+    limit: 15
+    params:
+      feeds:
+        - https://news.google.com/rss/search?q=amazon+beauty+bestseller&hl=en-US&gl=US&ceid=US:en
+  - name: apify:amazon-bestsellers
+    type: apify
+    enabled: false
+    params:
+      actor_id: "junglee/amazon-bestsellers"
+      token_env: APIFY_TOKEN
+      input: { categoryUrls: ["https://www.amazon.com/Best-Sellers-Beauty/zgbs/beauty"] }
+filters:
+  include_keywords: ["k-beauty", "korean", "skincare", "cosmetic", "amazon", "tiktok shop", "olive young"]
+  exclude_keywords: ["giveaway"]
+  max_age_hours: 72
+  max_items: 40
+llm:
+  primary: { provider: gemini, model: gemini-2.5-flash, api_key_env: GEMINI_API_KEY }
+  fallbacks:
+    - { provider: claude, model: claude-haiku-5-5, api_key_env: ANTHROPIC_API_KEY }
+  language: ko
+  audience: "K-beauty 수출 셀러 및 브랜드 마케터"
+  max_brief_items: 8
+  extra_instructions: "제품/성분/채널(아마존, 틱톡샵) 단위로 묶고, 셀러가 오늘 취할 액션을 insight에 적어라."
+notifiers:
+  - { type: markdown, path: output }
+  - { type: slack, webhook_env: SLACK_WEBHOOK_URL }
+  - { type: notion, enabled: false, token_env: NOTION_TOKEN, database_id_env: NOTION_DATABASE_ID }
+state: { path: .state/last_run.json, rising_score_delta: 20, rising_rank_jump: 3 }

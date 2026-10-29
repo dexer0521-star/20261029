@@ -1,0 +1,113 @@
+name: Daily Trend Brief
+
+on:
+  schedule:
+    # 22:30 UTC = 07:30 KST. GitHub cron is UTC and may lag a few minutes.
+    - cron: "30 22 * * *"
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: "Preset to run (leave empty to use config/config.yaml)"
+        type: choice
+        default: ""
+        options: ["", "ai-tech-news", "kbeauty-commerce", "quant-macro"]
+      dry_run:
+        description: "Dry run (no keys, sample data, markdown only)"
+        type: boolean
+        default: false
+
+# One run at a time so the state file is never written concurrently.
+concurrency:
+  group: daily-brief-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write   # needed to delete/overwrite the state cache key
+
+env:
+  PYTHON_VERSION: "3.12"
+  STATE_DIR: .state
+  STATE_KEY_PREFIX: trend-state-v1-${{ github.ref_name }}-${{ inputs.preset || 'default' }}
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install project
+        run: uv sync --no-dev || uv pip install --system -e .
+
+      # --- state: restore the previous run snapshot (cache miss on first run is fine) -----
+      - name: Restore previous state
+        id: restore-state
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.STATE_DIR }}
+          key: ${{ env.STATE_KEY_PREFIX }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ env.STATE_KEY_PREFIX }}-
+
+      # --- run: the agent degrades gracefully; a failing source or LLM never fails this step ---
+      - name: Run trend brief
+        id: run
+        continue-on-error: true
+        env:
+          # LLM providers (set the ones you use; the router skips missing keys)
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Notifiers
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          # Optional collectors
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: |
+          ARGS="--summary-json output/run_summary.json"
+          if [ -n "${{ inputs.preset }}" ]; then ARGS="$ARGS --preset ${{ inputs.preset }}"; fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          uv run python -m src.main $ARGS
+
+      # --- always keep evidence: markdown/json brief as an artifact (30 days) ---------------
+      - name: Upload brief artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trend-brief-${{ github.run_number }}
+          path: |
+            output/
+          if-no-files-found: warn
+          retention-days: 30
+
+      # --- state: save the new snapshot (only exists if the run produced one) ---------------
+      - name: Save state
+        if: always() && hashFiles('.state/last_run.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.STATE_DIR }}
+          key: ${{ env.STATE_KEY_PREFIX }}-${{ github.run_id }}
+
+      - name: Report outcome
+        if: always()
+        run: |
+          echo "run outcome: ${{ steps.run.outcome }}"
+          if [ -f output/run_summary.json ]; then cat output/run_summary.json; fi
+          # Fail the job only when the agent itself exited non-zero (all sources failed / config error).
+          if [ "${{ steps.run.outcome }}" != "success" ]; then exit 1; fi
